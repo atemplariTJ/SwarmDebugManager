@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import socket
 from collections.abc import Awaitable, Callable
+from time import monotonic
 
 import paramiko
 
@@ -13,6 +14,33 @@ StreamCallback = Callable[[str, str], Awaitable[None]]
 
 class SSHExecutionError(RuntimeError):
     pass
+
+
+async def probe_tcp(host: str, port: int, timeout: float) -> int | None:
+    started = monotonic()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout,
+        )
+        writer.close()
+        await writer.wait_closed()
+    except (OSError, asyncio.TimeoutError):
+        return None
+    return int((monotonic() - started) * 1000)
+
+
+async def check_ssh_login(host: str, port: int, settings: Settings) -> None:
+    if not settings.ssh_configured:
+        raise SSHExecutionError("ROBOT_SSH_USER and ROBOT_SSH_PASSWORD must be set")
+    client: paramiko.SSHClient | None = None
+    try:
+        client = await asyncio.to_thread(_connect, host, port, settings)
+    except (OSError, paramiko.SSHException, socket.timeout) as exc:
+        raise SSHExecutionError(str(exc)) from exc
+    finally:
+        if client is not None:
+            client.close()
 
 
 def _connect(host: str, port: int, settings: Settings) -> paramiko.SSHClient:
