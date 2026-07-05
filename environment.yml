@@ -1,0 +1,13 @@
+name: swarm-debug-manager
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - fastapi==0.115.6
+      - uvicorn[standard]==0.34.0
+      - paramiko==3.5.0
+      - pytest==8.3.4
+      - pytest-asyncio==0.25.0
+      - httpx==0.28.1

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MGS Debug Console</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0b0e13;
+      color: #d7dde7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .shell { display: grid; grid-template-columns: 330px 1fr; min-height: 100vh; }
+    aside { border-right: 1px solid #242b36; background: #11161f; padding: 18px; }
+    main { display: flex; flex-direction: column; min-width: 0; }
+    h1 { margin: 0 0 16px; font-size: 18px; letter-spacing: 0; }
+    .toolbar { display: flex; gap: 8px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #242b36; }
+    button {
+      border: 1px solid #2f3947;
+      background: #19212c;
+      color: #d7dde7;
+      border-radius: 6px;
+      padding: 8px 11px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { border-color: #3c8f84; }
+    input {
+      width: 100%;
+      border: 1px solid #2f3947;
+      background: #0f141c;
+      color: #d7dde7;
+      border-radius: 6px;
+      padding: 9px 10px;
+      font: inherit;
+    }
+    .status { color: #8792a2; font-size: 12px; margin: 12px 0; min-height: 17px; }
+    .robot-list { display: flex; flex-direction: column; gap: 6px; }
+    .robot {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: #151b25;
+      cursor: pointer;
+    }
+    .robot.active { border-color: #2dd4bf; background: #12251f; }
+    .robot strong { font-size: 14px; }
+    .robot span { color: #8d98a8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .terminal-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .terminal {
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #b8c2d0;
+      white-space: pre-wrap;
+    }
+    .line.stderr, .line.error { color: #ff7a70; }
+    .line.command { color: #6ea8fe; }
+    .line.exit { color: #2dd4bf; }
+    .prompt { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #242b36; }
+    .prompt label { color: #2dd4bf; font: 12px/38px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+    .empty { color: #6d7786; padding: 24px; }
+    @media (max-width: 800px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid #242b36; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <h1>MGS Debug Console</h1>
+      <button id="scanBtn" type="button">로봇 스캔</button>
+      <div id="status" class="status">백엔드 상태 확인 중...</div>
+      <div id="robots" class="robot-list"></div>
+      <p class="status">기존 번들 화면은 <a href="/legacy" style="color:#2dd4bf;">/legacy</a>에서 확인할 수 있습니다.</p>
+    </aside>
+    <main>
+      <div class="toolbar">
+        <strong id="activeTitle">선택된 로봇 없음</strong>
+        <button id="clearBtn" type="button">로그 클리어</button>
+      </div>
+      <div class="terminal-wrap">
+        <div id="terminal" class="terminal"><div class="empty">왼쪽에서 로봇을 스캔하고 선택하세요.</div></div>
+        <form id="prompt" class="prompt">
+          <label id="promptLabel">robot $</label>
+          <input id="command" autocomplete="off" placeholder="예: ros2 topic list" disabled>
+        </form>
+      </div>
+    </main>
+  </div>
+  <script>
+    const statusEl = document.getElementById('status');
+    const robotsEl = document.getElementById('robots');
+    const terminalEl = document.getElementById('terminal');
+    const activeTitle = document.getElementById('activeTitle');
+    const promptLabel = document.getElementById('promptLabel');
+    const commandEl = document.getElementById('command');
+    const scanBtn = document.getElementById('scanBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const promptForm = document.getElementById('prompt');
+
+    let robots = [];
+    let active = null;
+    let socket = null;
+
+    function setStatus(text) { statusEl.textContent = text; }
+    function appendLine(type, text) {
+      const div = document.createElement('div');
+      div.className = 'line ' + type;
+      div.textContent = text;
+      const empty = terminalEl.querySelector('.empty');
+      if (empty) terminalEl.textContent = '';
+      terminalEl.appendChild(div);
+      terminalEl.scrollTop = terminalEl.scrollHeight;
+    }
+    function renderRobots() {
+      robotsEl.textContent = '';
+      robots.forEach((robot) => {
+        const row = document.createElement('div');
+        row.className = 'robot' + (active && active.host === robot.host ? ' active' : '');
+        row.innerHTML = `<strong>${robot.id}</strong><span>${robot.latency_ms}ms</span><span>${robot.host}:${robot.port}</span><span>${robot.status}</span>`;
+        row.onclick = () => selectRobot(robot);
+        robotsEl.appendChild(row);
+      });
+    }
+    async function refreshRobots() {
+      const res = await fetch('/api/robots');
+      const data = await res.json();
+      robots = data.robots || [];
+      renderRobots();
+      setStatus(`${robots.length}대 발견됨`);
+    }
+    async function scanRobots() {
+      scanBtn.disabled = true;
+      setStatus('SSH 포트 스캔 중...');
+      try {
+        const res = await fetch('/api/robots/scan', { method: 'POST' });
+        const data = await res.json();
+        robots = data.robots || [];
+        renderRobots();
+        setStatus(`${robots.length}대 발견됨`);
+      } catch (err) {
+        setStatus('스캔 실패: ' + err.message);
+      } finally {
+        scanBtn.disabled = false;
+      }
+    }
+    function selectRobot(robot) {
+      active = robot;
+      if (socket) socket.close();
+      activeTitle.textContent = `${robot.id}  ${robot.host}`;
+      promptLabel.textContent = `${robot.id.toLowerCase()} $`;
+      commandEl.disabled = false;
+      terminalEl.textContent = '';
+      appendLine('exit', `[ssh] ${robot.host}:${robot.port} 선택됨`);
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${proto}//${location.host}/ws/terminal/${encodeURIComponent(robot.host)}`);
+      socket.onopen = () => appendLine('exit', '[ws] connected');
+      socket.onclose = () => appendLine('error', '[ws] disconnected');
+      socket.onerror = () => appendLine('error', '[ws] error');
+      socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'exit') appendLine('exit', `[exit ${msg.code}]`);
+        else appendLine(msg.type, msg.type === 'command' ? `$ ${msg.data}` : msg.data);
+      };
+      renderRobots();
+    }
+    promptForm.onsubmit = (event) => {
+      event.preventDefault();
+      const command = commandEl.value.trim();
+      if (!command || !socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ command }));
+      commandEl.value = '';
+    };
+    clearBtn.onclick = () => { terminalEl.textContent = ''; };
+    scanBtn.onclick = scanRobots;
+    fetch('/api/health')
+      .then((res) => res.json())
+      .then((data) => setStatus(data.ssh_configured ? 'SSH 설정 완료' : 'SSH 계정 환경변수가 필요합니다'))
+      .then(refreshRobots)
+      .catch((err) => setStatus('백엔드 연결 실패: ' + err.message));
+  </script>
+</body>
+</html>

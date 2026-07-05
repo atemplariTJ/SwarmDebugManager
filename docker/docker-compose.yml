@@ -1,0 +1,45 @@
+services:
+  robot1:
+    build:
+      context: .
+      dockerfile: robot.Dockerfile
+    container_name: ros2unity-robot1
+    environment:
+      ROBOT_ID: R11
+    ports:
+      - "2221:22"
+    networks:
+      ros2unity:
+        ipv4_address: 172.28.0.11
+
+  robot2:
+    build:
+      context: .
+      dockerfile: robot.Dockerfile
+    container_name: ros2unity-robot2
+    environment:
+      ROBOT_ID: R12
+    ports:
+      - "2222:22"
+    networks:
+      ros2unity:
+        ipv4_address: 172.28.0.12
+
+  robot3:
+    build:
+      context: .
+      dockerfile: robot.Dockerfile
+    container_name: ros2unity-robot3
+    environment:
+      ROBOT_ID: R13
+    ports:
+      - "2223:22"
+    networks:
+      ros2unity:
+        ipv4_address: 172.28.0.13
+
+networks:
+  ros2unity:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

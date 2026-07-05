@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmd="${1:-}"
+sub="${2:-}"
+
+if [[ "$cmd $sub" == "topic list" ]]; then
+  printf "/odom\n/scan\n/cmd_vel\n/battery_state\n/tf\n/tf_static\n/map\n"
+elif [[ "$cmd $sub" == "topic echo" ]]; then
+  topic="${3:-/unknown}"
+  for i in 1 2 3; do
+    printf "topic: %s\nseq: %s\nrobot: %s\n---\n" "$topic" "$i" "${ROBOT_ID:-RXX}"
+    sleep 0.2
+  done
+elif [[ "$cmd" == "node" && "$sub" == "list" ]]; then
+  printf "/%s/debug_agent\n/%s/state_publisher\n" "${ROBOT_ID:-robot}" "${ROBOT_ID:-robot}"
+else
+  printf "fake ros2: unsupported command: ros2 %s\n" "$*" >&2
+  exit 2
+fi
